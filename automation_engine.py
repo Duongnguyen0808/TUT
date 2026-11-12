@@ -1009,7 +1009,7 @@ class GoogleUltraAutomator:
                                                     expm = (self.card.get("exp_month") or "").zfill(2)
                                                     expy = (self.card.get("exp_year") or "")[-2:]
                                                     cvc_v = (self.card.get("cvc") or "").strip()
-                                                    holder_v = (self.card.get("holder") or "DANG DUONG NGUYEN").strip()
+                                                    holder_v = (self.card.get("holder") or "").strip()
                                                     zip_v = (self.card.get("postal_code") or "97201").strip()
 
                                                     async def _robust_fill(loc, text_val, is_date=False):
@@ -1032,9 +1032,9 @@ class GoogleUltraAutomator:
 
                                                     # 0. Số thẻ (Card number)
                                                     v0 = await _robust_fill(vis.nth(0), cnum)
-                                                    # 1. Hạn thẻ MM/YY (08/31)
+                                                    # 1. Hạn thẻ MM/YY
                                                     v1 = await _robust_fill(vis.nth(1), f"{expm}{expy}", is_date=True)
-                                                    # 2. CVC (420)
+                                                    # 2. CVC
                                                     v2 = await _robust_fill(vis.nth(2), cvc_v)
                                                     
                                                     # Wait for Name / Address / ZIP inputs to dynamically reveal
@@ -1042,7 +1042,7 @@ class GoogleUltraAutomator:
                                                     vis = tf.locator("input:visible")
                                                     cnt = await vis.count()
                                                     
-                                                    # 3. Tên chủ thẻ (DANG DUONG NGUYEN)
+                                                    # 3. Tên chủ thẻ (Cardholder name)
                                                     v3 = ""
                                                     if cnt >= 4:
                                                         await vis.nth(3).click(force=True)
