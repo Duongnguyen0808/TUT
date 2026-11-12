@@ -1,8 +1,10 @@
 __pycache__/
 *.pyc
 profiles/
+chrome_profiles/
 screenshots/
 *.png
 *.jpg
 *.jpeg
 *.log
+
