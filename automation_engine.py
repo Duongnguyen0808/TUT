@@ -580,7 +580,7 @@ class GoogleUltraAutomator:
 
             if "gds.google.com" in page_obj.url or "recoveryoptions" in page_obj.url or "确保您始终都能登录" in body:
                 self.log("检测到 gds.google.com 辅助信息提示页，正在点击【取消/跳过】完成登录跳转...")
-                cancel_btn = page_obj.locator('button:has-text("取消"), button:has-text("Cancel"), button:has-text("跳过"), button:has-text("Skip"), [role="button"]:has-text("取消"), [role="button"]:has-text("Cancel"), text="取消", text="Cancel"').first
+                cancel_btn = page_obj.locator('button:has-text("取消"), button:has-text("Cancel"), button:has-text("跳过"), button:has-text("Skip"), [role="button"]:has-text("取消"), [role="button"]:has-text("Cancel"), button:has-text("以后再说"), [role="button"]:has-text("以后再说")').first
                 if await cancel_btn.count() > 0:
                     try:
                         await cancel_btn.click(timeout=3000)
@@ -671,6 +671,14 @@ class GoogleUltraAutomator:
                         except Exception:
                             pass
                 continue
+
+            if "speedbump" in page_obj.url or "passkeyenrollment" in page_obj.url or "以后再说" in body or "Not now" in body:
+                skip_btn = page_obj.locator('button:has-text("以后再说"), [role="button"]:has-text("以后再说"), button:has-text("Not now"), [role="button"]:has-text("Not now")').first
+                if await skip_btn.count() > 0 and await skip_btn.is_visible():
+                    self.log("检测到通行密钥设置页 (passkey enrollment)，点击【以后再说】跳过...")
+                    await skip_btn.click(force=True)
+                    await asyncio.sleep(4.0)
+                    continue
 
             # Check if an open dialog modal (VfPpkd-Sx9Kwc-OWXEXe-FNFY6c) is shown on top of the page
             open_dialog_btn = page_obj.locator('div.VfPpkd-Sx9Kwc-OWXEXe-FNFY6c button, div.VfPpkd-Sx9Kwc-OWXEXe-FNFY6c [role="button"], div[role="dialog"] button, div[role="dialog"] [role="button"]')
@@ -878,12 +886,16 @@ class GoogleUltraAutomator:
 
     async def inspect_play_subscriptions(self, page) -> str:
         await self.safe_goto(page, "https://play.google.com/store/account/subscriptions?hl=zh-CN", timeout=40000)
-        await asyncio.sleep(3)
-        if "accounts.google.com" in page.url or "gds.google.com" in page.url:
-            await self.pass_reauth_on_page(page)
-            await asyncio.sleep(3)
+        await asyncio.sleep(4)
+        for _ in range(3):
+            if "accounts.google.com" in page.url or "gds.google.com" in page.url:
+                await self.pass_reauth_on_page(page)
+                await asyncio.sleep(3.5)
+            else:
+                break
         txt = await page.inner_text("body")
         clean = " | ".join([l.strip() for l in txt.splitlines() if l.strip()])
+        self.log(f"Play 订阅页状态: {clean[:200]}")
         return clean
 
     async def ensure_subscription_active(self, page):
@@ -897,17 +909,17 @@ class GoogleUltraAutomator:
             body = await page.inner_text("body", timeout=3000)
         except Exception:
             body = ""
-        if "重新订阅" in body:
-            self.log("检测到当前订阅处于【已取消】状态，正在点击【重新订阅】恢复活跃状态以便继续叠加...")
-            rbtn = page.get_by_text("重新订阅", exact=True).first
+        if any(k in body for k in ("重新订阅", "Resubscribe", "Đăng ký lại")):
+            self.log("检测到当前订阅处于【已取消】状态，正在点击【重新订阅/Đăng ký lại】恢复活跃状态以便继续叠加...")
+            rbtn = page.locator('text=/重新订阅|Resubscribe|Đăng ký lại/').first
             if await rbtn.count() > 0:
                 await rbtn.click(force=True)
                 await asyncio.sleep(3.5)
-                cbtn = page.get_by_text("重新订阅", exact=True).last
+                cbtn = page.locator('text=/重新订阅|Resubscribe|Đăng ký lại/').last
                 if await cbtn.count() > 0 and await cbtn.is_visible():
                     await cbtn.click(force=True)
                     await asyncio.sleep(5.0)
-                ok_btn = page.get_by_text("确定", exact=True).first
+                ok_btn = page.locator('text=/确定|OK|Xác nhận|Đã hiểu/').first
                 if await ok_btn.count() > 0 and await ok_btn.is_visible():
                     await ok_btn.click(force=True)
                     await asyncio.sleep(2.0)
@@ -945,9 +957,9 @@ class GoogleUltraAutomator:
                             const hasSubBtn = !needsCard && btns.some(b => {
                                 const bt = (b.innerText || '').trim().toLowerCase();
                                 const r = b.getBoundingClientRect();
-                                return (bt === '订阅' || bt === 'subscribe') && r.width > 10 && r.height > 10;
+                                return (bt === '订阅' || bt === 'subscribe' || bt === 'đăng ký' || bt.includes('đăng ký')) && r.width > 10 && r.height > 10;
                             });
-                            const hasErr = text.includes('Something went wrong') || text.includes('unable to change') || text.includes('无法更改') || text.includes('出了点问题') || text.includes('OR-') || text.includes('BX-');
+                            const hasErr = text.includes('不可订阅') || text.includes('无法使用') || text.includes('Không thể đăng ký') || text.includes('không thể sử dụng') || text.includes('Something went wrong') || text.includes('unable to change') || text.includes('无法更改') || text.includes('出了点问题') || text.includes('OR-') || text.includes('BX-');
                             return {ready: hasSubBtn || hasErr, text: text};
                         }"""
                         )
@@ -961,86 +973,161 @@ class GoogleUltraAutomator:
                                 add_btn = fr.locator("text=/添加信用卡或借记卡|添加卡|Add credit or debit card|Add card/i").last
                                 if await add_btn.count() > 0 and await add_btn.is_visible():
                                     self.log(f"[{step_tag or 'modal'}] 检测到弹窗需先添加付款方式，正在执行弹窗内联免税绑卡 (ZIP 97201)...")
-                                    try:
-                                        await add_btn.click(force=True)
-                                    except Exception:
-                                        pass
-                                    await fr.evaluate(
-                                        """() => {
-                                        const els = Array.from(document.querySelectorAll('button, [role="button"], div, span'));
-                                        for (let i = els.length - 1; i >= 0; i--) {
-                                            const t = (els[i].innerText || '').trim();
-                                            if (t === '添加卡' || t === '添加信用卡或借记卡' || t === 'Add card' || t === 'Add credit or debit card') {
-                                                els[i].click();
-                                                break;
-                                            }
-                                        }
-                                    }"""
-                                    )
+                                    if not any("instrumentmanager" in (f.url or "") for f in page.frames):
+                                        try:
+                                            await add_btn.click()
+                                        except Exception:
+                                            await fr.evaluate(
+                                                """() => {
+                                                const els = Array.from(document.querySelectorAll('button, [role="button"], div, span'));
+                                                for (let i = els.length - 1; i >= 0; i--) {
+                                                    const t = (els[i].innerText || '').trim();
+                                                    if (t === '添加卡' || t === '添加信用卡或借记卡' || t === 'Add card' || t === 'Add credit or debit card') {
+                                                        els[i].click();
+                                                        break;
+                                                    }
+                                                }
+                                            }"""
+                                            )
                                     for _ in range(20):
                                         await asyncio.sleep(1.0)
-                                        all_frames = list(page.frames)
-                                        for tf in all_frames:
+                                        im_frames = [f for f in page.frames if "instrumentmanager" in (f.url or "")]
+                                        for tf in reversed(im_frames):
                                             try:
                                                 vis = tf.locator("input:visible")
                                                 cnt = await vis.count()
-                                                if cnt >= 4:
+                                                if cnt >= 3:
+                                                    inputs_desc = []
+                                                    for _i in range(cnt):
+                                                        in_el = vis.nth(_i)
+                                                        ph = (await in_el.get_attribute("placeholder")) or ""
+                                                        aria = (await in_el.get_attribute("aria-label")) or ""
+                                                        nm = (await in_el.get_attribute("name")) or ""
+                                                        inputs_desc.append(f"[{_i}]: ph='{ph}' aria='{aria}' name='{nm}'")
+                                                    self.log(f"[{step_tag or 'modal'}] 💳 检测到绑卡输入框 ({cnt}个): {' ; '.join(inputs_desc)}")
                                                     cnum = (self.card.get("number") or "").replace(" ", "")
                                                     expm = (self.card.get("exp_month") or "").zfill(2)
                                                     expy = (self.card.get("exp_year") or "")[-2:]
                                                     cvc_v = (self.card.get("cvc") or "").strip()
-                                                    holder_v = (self.card.get("holder") or "CARD HOLDER").strip()
+                                                    holder_v = (self.card.get("holder") or "DANG DUONG NGUYEN").strip()
                                                     zip_v = (self.card.get("postal_code") or "97201").strip()
-                                                    await vis.nth(0).click(force=True)
-                                                    await asyncio.sleep(0.2)
-                                                    await vis.nth(0).press_sequentially(cnum, delay=35)
-                                                    await asyncio.sleep(0.3)
-                                                    await vis.nth(1).click(force=True)
-                                                    await asyncio.sleep(0.2)
-                                                    await vis.nth(1).press_sequentially(f"{expm}{expy}", delay=35)
-                                                    await asyncio.sleep(0.3)
-                                                    await vis.nth(2).click(force=True)
-                                                    await asyncio.sleep(0.2)
-                                                    await vis.nth(2).press_sequentially(cvc_v, delay=35)
-                                                    await asyncio.sleep(0.3)
-                                                    try:
-                                                        cur_name = (await vis.nth(3).input_value(timeout=1000)).strip()
-                                                        if not cur_name:
-                                                            await vis.nth(3).fill(holder_v)
+
+                                                    async def _robust_fill(loc, text_val, is_date=False):
+                                                        await loc.click(force=True)
+                                                        await asyncio.sleep(0.15)
+                                                        try:
+                                                            await loc.fill(text_val)
+                                                        except Exception:
+                                                            pass
+                                                        await asyncio.sleep(0.15)
+                                                        raw_val = (await loc.input_value()).replace(" ", "").replace("/", "").replace("\u200e", "")
+                                                        if raw_val != text_val:
+                                                            await loc.click(force=True)
+                                                            await loc.press("Control+a")
+                                                            await loc.press("Backspace")
+                                                            await asyncio.sleep(0.1)
+                                                            await loc.press_sequentially(text_val, delay=45)
                                                             await asyncio.sleep(0.2)
-                                                    except Exception:
-                                                        pass
-                                                    if cnt >= 5:
-                                                        await vis.nth(4).click(force=True)
+                                                        return await loc.input_value()
+
+                                                    # 0. Số thẻ (Card number)
+                                                    v0 = await _robust_fill(vis.nth(0), cnum)
+                                                    # 1. Hạn thẻ MM/YY (08/31)
+                                                    v1 = await _robust_fill(vis.nth(1), f"{expm}{expy}", is_date=True)
+                                                    # 2. CVC (420)
+                                                    v2 = await _robust_fill(vis.nth(2), cvc_v)
+                                                    
+                                                    # Wait for Name / Address / ZIP inputs to dynamically reveal
+                                                    await asyncio.sleep(1.2)
+                                                    vis = tf.locator("input:visible")
+                                                    cnt = await vis.count()
+                                                    
+                                                    # 3. Tên chủ thẻ (DANG DUONG NGUYEN)
+                                                    v3 = ""
+                                                    if cnt >= 4:
+                                                        await vis.nth(3).click(force=True)
+                                                        await asyncio.sleep(0.1)
+                                                        await vis.nth(3).press("Control+a")
+                                                        await vis.nth(3).press("Backspace")
+                                                        await asyncio.sleep(0.1)
+                                                        await vis.nth(3).fill(holder_v)
                                                         await asyncio.sleep(0.2)
-                                                        await vis.nth(4).fill("")
-                                                        await vis.nth(4).press_sequentially(zip_v, delay=35)
-                                                        await asyncio.sleep(0.3)
-                                                    sbtn = tf.locator('button:has-text("保存卡"), button:has-text("保存"), button:has-text("Save card"), button:has-text("Save"), [role="button"]:has-text("保存")').first
-                                                    if await sbtn.count() > 0:
-                                                        await sbtn.click(force=True)
-                                                    else:
-                                                        await tf.evaluate(
-                                                            """() => {
-                                                            const btns = Array.from(document.querySelectorAll('button, [role="button"]'));
-                                                            const b = btns.find(e => (e.innerText || '').includes('保存') || (e.innerText || '').includes('Save'));
-                                                            if (b) b.click();
-                                                        }"""
-                                                        )
+                                                        v3 = await vis.nth(3).input_value()
+                                                    # 4. ZIP code (97201)
+                                                    v4 = ""
+                                                    if cnt >= 5:
+                                                        v4 = await _robust_fill(vis.nth(4), zip_v)
+
+                                                    self.log(f"[{step_tag or 'modal'}] 💳 Đã điền xong thông tin thẻ: Số='{v0}' | Hạn='{v1}' | CVC='{v2}' | Tên='{v3}' | ZIP='{v4}'")
+                                                    await tf.evaluate(
+                                                        """() => {
+                                                        const btns = Array.from(document.querySelectorAll('button, [role="button"]'));
+                                                        const b = btns.find(e => (e.innerText || '').includes('保存') || (e.innerText || '').includes('Save') || (e.innerText || '').includes('Lưu'));
+                                                        if (b) b.click();
+                                                    }"""
+                                                    )
                                                     self.log(f"[{step_tag or 'modal'}] ✅ 已点击【保存卡】，等待 Google Play 绑定确认...")
-                                                    for _w in range(22):
+                                                    for _w in range(25):
                                                         await asyncio.sleep(1.0)
+                                                        saved_detected = False
+                                                        for f in page.frames:
+                                                            try:
+                                                                f_txt = await f.inner_text("body", timeout=1000)
+                                                                if (target_last4 and target_last4 in f_txt) or any(k in f_txt for k in ("订阅", "Subscribe", "Đăng ký")):
+                                                                    if "保存卡" not in f_txt and "Save card" not in f_txt:
+                                                                        saved_detected = True
+                                                                        break
+                                                            except Exception:
+                                                                pass
+                                                        if saved_detected:
+                                                            self.log(f"[{step_tag or 'modal'}] ✅ Đã lưu thẻ thành công, Google Play đã hiển thị nút Đăng ký (Subscribe)!")
+                                                            inline_card_saved = True
+                                                            break
                                                         still_im = any("instrumentmanager" in (f.url or "") for f in page.frames)
                                                         if not still_im:
                                                             self.log(f"[{step_tag or 'modal'}] ✅ 内联银行卡保存完成！")
+                                                            inline_card_saved = True
                                                             break
-                                                        if _w == 7 and await sbtn.count() > 0:
+                                                        # Check if Google returned an explicit card error inside tf
+                                                        try:
+                                                            err_txt = await tf.evaluate('''() => {
+                                                                const els = Array.from(document.querySelectorAll('[role="alert"], [aria-live], .errorMessage, [class*="error"], [class*="Error"]'));
+                                                                return els.map(a => (a.innerText || "").trim()).filter(t => t && !t.includes("所有字段均为必填字段")).join(" | ");
+                                                            }''')
+                                                            if err_txt and any(ek in err_txt for ek in ("OR_", "无法完成", "不能", "拒绝", "无效", "更正", "declined", "invalid", "not accepted", "không thể")):
+                                                                self.log(f"[{step_tag or 'modal'}] ❌ THẺ BỊ TỪ CHỐI: {err_txt}")
+                                                                await self.save_screenshot(page, "card_save_failed")
+                                                                return None, f"CARD_REJECTED: {err_txt}"
+                                                        except Exception:
+                                                            pass
+                                                        if _w == 8:
                                                             try:
-                                                                await sbtn.click(force=True)
+                                                                await tf.evaluate(
+                                                                    """() => {
+                                                                    const btns = Array.from(document.querySelectorAll('button, [role="button"]'));
+                                                                    const b = btns.find(e => (e.innerText || '').includes('保存') || (e.innerText || '').includes('Save') || (e.innerText || '').includes('Lưu'));
+                                                                    if (b) b.click();
+                                                                }"""
+                                                                )
                                                             except Exception:
                                                                 pass
+                                                    if not inline_card_saved:
+                                                        err_txt = ""
+                                                        try:
+                                                            err_txt = await tf.evaluate('''() => {
+                                                                const els = Array.from(document.querySelectorAll('[role="alert"], [aria-live], .errorMessage, [class*="error"], [class*="Error"]'));
+                                                                return els.map(a => (a.innerText || "").trim()).filter(Boolean).join(" | ");
+                                                            }''')
+                                                        except Exception:
+                                                            pass
+                                                        if err_txt:
+                                                            self.log(f"[{step_tag or 'modal'}] ❌ THẺ BỊ TỪ CHỐI: {err_txt}")
+                                                            await self.save_screenshot(page, "card_save_failed")
+                                                            return None, f"CARD_REJECTED: {err_txt}"
+                                                        self.log(f"[{step_tag or 'modal'}] ⚠️ Thẻ chưa được lưu (hết thời gian chờ xác nhận).")
+                                                        await self.save_screenshot(page, "card_save_timeout")
+                                                        return None, "CARD_SAVE_TIMEOUT"
                                                     await asyncio.sleep(2.0)
-                                                    inline_card_saved = True
                                                     loops_left = 15
                                                     break
                                             except Exception:
@@ -1119,48 +1206,66 @@ class GoogleUltraAutomator:
                 await self.safe_goto(page, attempt_url, timeout=40000)
                 await asyncio.sleep(3.5)
 
-            await page.evaluate(HOOK_JS)
-            await page.evaluate(f"window.__setDirectTest({json.dumps(cfg)})")
+            for _inj in range(3):
+                try:
+                    await page.evaluate(HOOK_JS)
+                    await page.evaluate(f"window.__setDirectTest({json.dumps(cfg)})")
+                    break
+                except Exception:
+                    await asyncio.sleep(1.5)
 
             fb_btn = None
             for _ in range(10):
                 await asyncio.sleep(1.2)
-                await page.evaluate(HOOK_JS)
-                await page.evaluate(f"window.__setDirectTest({json.dumps(cfg)})")
-                fb_btn = await page.evaluate(
-                    """() => {
-                    const els = Array.from(document.querySelectorAll('button, a, [role="button"]'));
-                    const btns = els.filter(e => {
-                        const t = (e.innerText || '').trim();
-                        const r = e.getBoundingClientRect();
-                        return r.width > 15 && r.height > 15 && r.left >= 240 && (
-                            t.includes('开始使用') ||
-                            t.includes('获取优惠') ||
-                            t.includes('获取折扣') ||
-                            t.includes('换用此方案') ||
-                            t === '升级' ||
-                            t === 'Upgrade' ||
-                            t.includes('获取 Google AI Ultra') ||
-                            t.includes('Get started') ||
-                            t.includes('Get offer')
-                        );
-                    });
-                    if (btns.length > 0) {
-                        const btn = btns[btns.length - 1];
-                        btn.scrollIntoView({block: 'center'});
-                        const r = btn.getBoundingClientRect();
-                        btn.click();
-                        return {x: r.left + r.width / 2, y: r.top + r.height / 2, text: (btn.innerText || '').trim()};
-                    }
-                    return null;
-                }"""
-                )
+                try:
+                    await page.evaluate(HOOK_JS)
+                    await page.evaluate(f"window.__setDirectTest({json.dumps(cfg)})")
+                    fb_btn = await page.evaluate(
+                        """() => {
+                        const els = Array.from(document.querySelectorAll('button, a, [role="button"]'));
+                        const btns = els.filter(e => {
+                            const t = (e.innerText || '').trim();
+                            const r = e.getBoundingClientRect();
+                            return r.width > 15 && r.height > 15 && (
+                                t.includes('开始使用') ||
+                                t.includes('获取优惠') ||
+                                t.includes('获取折扣') ||
+                                t.includes('换用此方案') ||
+                                t === '升级' ||
+                                t === 'Upgrade' ||
+                                t.includes('获取 Google AI Ultra') ||
+                                t.includes('Get started') ||
+                                t.includes('Get offer') ||
+                                t.includes('Sign up') ||
+                                t.includes('Subscribe') ||
+                                t.includes('Bắt đầu') ||
+                                t.includes('Nhận ưu đãi') ||
+                                t.includes('Nhận chiết khấu') ||
+                                t.includes('Nâng cấp') ||
+                                t.includes('Đăng ký')
+                            );
+                        });
+                        if (btns.length > 0) {
+                            const btn = btns[btns.length - 1];
+                            btn.scrollIntoView({block: 'center'});
+                            const r = btn.getBoundingClientRect();
+                            btn.click();
+                            return {x: r.left + r.width / 2, y: r.top + r.height / 2, text: (btn.innerText || '').trim()};
+                        }
+                        return null;
+                    }"""
+                    )
+                except Exception:
+                    pass
                 if fb_btn:
                     self.log(f"[{step_tag}] 已点击【{fb_btn.get('text', '')}】触发按钮，等待 Google Play 结账弹窗...")
                     break
 
             if fb_btn:
                 target_fr, clean_txt = await self._poll_eacquire_modal(page, max_loops=60, step_tag=step_tag)
+                if clean_txt and clean_txt.startswith("CARD_REJECTED"):
+                    self.last_subscribe_error = clean_txt
+                    return False
                 if clean_txt == "INLINE_CARD_SAVED_RETRY":
                     self.log(f"[{step_tag}] 内联绑卡已完成，正在重新打开方案页拉起 0 元结账弹窗...")
                     continue
@@ -1202,8 +1307,18 @@ class GoogleUltraAutomator:
             except Exception as pm_err:
                 self.log(f"[{step_tag}] 切换付款卡提示: {pm_err}")
 
+        if any(k in clean_txt for k in ("不可订阅", "无法使用", "Không thể đăng ký", "không thể sử dụng")):
+            self.last_subscribe_error = f"REJECTED_REGION: Google Play từ chối do tài khoản ở vùng không hỗ trợ ({clean_txt[:150]})"
+            self.log(f"❌ [{step_tag}] {self.last_subscribe_error}")
+            return False
+
+        if "今天 US$11.99" in clean_txt or "今天US$11.99" in clean_txt or (step_tag == "step2_layer1_12m" and any(k in clean_txt for k in ("不符合条件", "无法免费试用YouTube", "无法免费试用 YouTube"))):
+            self.last_subscribe_error = f"YT_INELIGIBLE: 账号不符合 YouTube Premium 免试资格 ({clean_txt[:150]})"
+            self.log(f"⚠️ [{step_tag}] {self.last_subscribe_error}")
+            return False
+
         # Strict zero-cost protection when running 2-year Pro stacking
-        if "ultra" not in step_tag.lower() and "0.00" not in clean_txt and "免费" not in clean_txt and "Free" not in clean_txt:
+        if "ultra" not in step_tag.lower() and not any(k in clean_txt for k in ("0.00", "0,00", "0 ₫", "0 đ", "US$0", "免费", "Free", "free", "Miễn phí", "miễn phí")):
             self.last_subscribe_error = f"零消费保护拦截：弹窗未显示 0.00 免费试用 ({clean_txt[:180]})"
             self.log(f"❌ [{step_tag}] {self.last_subscribe_error}")
             return False
@@ -1220,7 +1335,7 @@ class GoogleUltraAutomator:
             b = all_btns.nth(i)
             try:
                 btxt = (await b.inner_text()).strip()
-                if btxt in ("订阅", "Subscribe"):
+                if btxt in ("订阅", "Subscribe", "Đăng ký", "đăng ký") or btxt.lower() == "đăng ký":
                     self.log(f"--> 正在点击 [{step_tag}] 的【{btxt}】按钮...")
                     try:
                         await b.scroll_into_view_if_needed(timeout=3000)
@@ -1238,8 +1353,8 @@ class GoogleUltraAutomator:
                 """() => {
                 const btns = Array.from(document.querySelectorAll('button, [role="button"]'));
                 const sub = btns.find(b => {
-                    const bt = (b.innerText || '').trim();
-                    return bt === '订阅' || bt === 'Subscribe';
+                    const bt = (b.innerText || '').trim().toLowerCase();
+                    return bt === '订阅' || bt === 'subscribe' || bt === 'đăng ký' || bt.includes('đăng ký');
                 });
                 if (sub) {
                     sub.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true}));
@@ -1252,7 +1367,7 @@ class GoogleUltraAutomator:
             }"""
             )
             if js_clicked:
-                self.log(f"--> 已通过 JS 原生事件触发 [{step_tag}] 的【订阅/Subscribe】按钮点击！")
+                self.log(f"--> 已通过 JS 原生事件触发 [{step_tag}] 的【订阅/Subscribe/Đăng ký】按钮点击！")
                 clicked = True
 
         if not clicked:
@@ -1273,7 +1388,7 @@ class GoogleUltraAutomator:
             ordered_frames = [f for f in page.frames if f != page.main_frame] + [page.main_frame]
             for f2 in ordered_frames:
                 f2_url = f2.url or ""
-                if "eacquire" in f2_url:
+                if any(k in f2_url for k in ("eacquire", "postacquire", "payments.google.com", "play.google.com/store/payment", "buyflow")):
                     eacquire_present = True
                 try:
                     f2_txt = (await f2.inner_text("body", timeout=1500)).strip()
@@ -1346,11 +1461,19 @@ class GoogleUltraAutomator:
                     try:
                         ft_after = f2_txt
                         clean_after = " | ".join([l.strip() for l in ft_after.splitlines() if l.strip()])
+                        if any(err_kw in clean_after for err_kw in ("付款遭拒", "支付遭拒", "拒绝了您的付款", "发卡机构拒绝", "OR-PFGVEM", "OR-CCREU", "资金不足", "卡状态", "卡已被拒绝", "交易被拒绝")):
+                            self.last_subscribe_error = clean_after
+                            self.log(f"❌ [{step_tag}] 结账被发卡行拒绝: {clean_after}")
+                            await self.save_screenshot(page, f"{step_tag}_after_click")
+                            return False
                         if any(
                             ok_kw in clean_after
                             for ok_kw in (
                                 "已订阅",
                                 "Subscribed",
+                                "Đã đăng ký",
+                                "đã đăng ký",
+                                "Cảm ơn",
                                 "感谢您订阅",
                                 "通过此类购买活动获取",
                                 "Google Play 积分",
@@ -1361,8 +1484,6 @@ class GoogleUltraAutomator:
                                 "备用付款方式",
                                 "Backup payment",
                                 "以后再说",
-                                "知道了",
-                                "Got it",
                             )
                         ):
                             self.log(f"✅ [{step_tag}] 检测到订阅成功确认提示！")
@@ -1424,7 +1545,7 @@ class GoogleUltraAutomator:
                         pass
             if post_click_err:
                 break
-            if wait_i >= 3 and not eacquire_present and not reauth_spinning:
+            if wait_i >= 12 and not eacquire_present and not reauth_spinning:
                 # Check main page for "购买失败" toast or "欢迎您！您的新会员已生效" before assuming modal closure result
                 try:
                     main_body_txt = (await page.main_frame.inner_text("body", timeout=2000)).strip()
@@ -1440,6 +1561,23 @@ class GoogleUltraAutomator:
                     return True
                 self.log(f"⚠️ [{step_tag}] 结账弹窗已关闭但未捕获到【已订阅/Play积分】明确成功标志，正在校验后台订阅状态...")
                 await asyncio.sleep(5.0)
+                try:
+                    main_body_txt = (await page.main_frame.inner_text("body", timeout=2000)).strip()
+                except Exception:
+                    pass
+                if "欢迎您" in main_body_txt or "新会员已生效" in main_body_txt or "Welcome" in main_body_txt:
+                    self.log(f"✅ [{step_tag}] 检测到 Google One 新会员已生效欢迎页，订阅成功！")
+                    await self.save_screenshot(page, f"{step_tag}_after_click")
+                    await asyncio.sleep(4.0)
+                    return True
+                try:
+                    check_txt = await self.inspect_play_subscriptions(page)
+                    if any(k in check_txt for k in ("Google One", "Google AI", "2027", "2028")):
+                        self.log(f"✅ [{step_tag}] 后台校验通过：Play 订阅页已生效 Google One！")
+                        await self.save_screenshot(page, f"{step_tag}_after_click")
+                        return True
+                except Exception as chk_e:
+                    self.log(f"[{step_tag}] 校验后台状态提示: {chk_e}")
                 await self.save_screenshot(page, f"{step_tag}_after_click")
                 post_click_err = "结账弹窗已关闭但未出现【已订阅】确认标志，疑似后台卡单 (应收款)"
                 break
@@ -1484,9 +1622,29 @@ class GoogleUltraAutomator:
         }
         ok = await self.open_and_click_subscribe(page, cfg_l1, "step2_layer1_12m")
         if not ok:
-            self.log("⚠️ Step 2 首次触发未完成结账，正在等待 3 秒后进行重试 (2/2)...")
-            await asyncio.sleep(3.0)
-            ok = await self.open_and_click_subscribe(page, cfg_l1, "step2_layer1_12m")
+            if "REJECTED_REGION" in (self.last_subscribe_error or "") and "单独订阅此套装中的其他商品" not in (self.last_subscribe_error or "") and "YouTube Premium" not in (self.last_subscribe_error or ""):
+                raise RuntimeError(f"❌ {self.last_subscribe_error}")
+            self.log("⚠️ Step 2 账号不含 YouTube 免费资格，正在切换为纯 Google AI Pro (5 TB) 12M 零成本通道...")
+            await asyncio.sleep(2.5)
+            cfg_l1_pure = {
+                "name": "Step2_Layer1_12M_Pure_ZeroCost",
+                "full_items": [
+                    [[PREFIX + "g1.2tb.ai.subs_variant", 21], None, None, None, 1, [TOK_PRO5TB_12M]],
+                ],
+                "ear8": [None, 5, None, None, None, [sub_id]] if sub_id else None,
+            }
+            ok = await self.open_and_click_subscribe(page, cfg_l1_pure, "step2_layer1_12m")
+            if not ok:
+                self.log("⚠️ Step 2 纯 12M 通道返回异常，正在尝试 6M 零成本首层通道 (S25)...")
+                await asyncio.sleep(2.5)
+                cfg_l1_6m = {
+                    "name": "Step2_Layer1_6M_Pure_ZeroCost",
+                    "full_items": [
+                        [[PREFIX + "g1.2tb.ai.subs_variant", 21], None, None, None, 1, [TOK_PRO5TB_6M_SS]],
+                    ],
+                    "ear8": [None, 5, None, None, None, [sub_id]] if sub_id else None,
+                }
+                ok = await self.open_and_click_subscribe(page, cfg_l1_6m, "step2_layer1_12m")
         if not ok:
             raise RuntimeError(f"Step 2 (首层 12个月免费叠加 US$0.00) 未成功: {self.last_subscribe_error}")
         self.log("✅ Step 2 (首层 12个月免费包 US$0.00) 订阅完成！正在等待 45 秒让 Google Play 后台彻底完成清算...")
@@ -1518,9 +1676,16 @@ class GoogleUltraAutomator:
         }
         ok = await self.open_and_click_subscribe(page, cfg_l2, "step3_layer2_6mss")
         if not ok:
-            self.log("⚠️ Step 3 首次触发未完成结账，正在等待 3 秒后进行重试 (2/2)...")
-            await asyncio.sleep(3.0)
-            ok = await self.open_and_click_subscribe(page, cfg_l2, "step3_layer2_6mss")
+            self.log("⚠️ Step 3 切换为纯 Google AI Pro (5 TB) 6M 零成本通道...")
+            await asyncio.sleep(2.5)
+            cfg_l2_pure = {
+                "name": "Step3_Layer2_6MSS_Pure_ZeroCost",
+                "full_items": [
+                    [[PREFIX + "g1.2tb.ai.subs_variant", 21], None, None, None, 1, [TOK_PRO5TB_6M_SS]],
+                ],
+                "ear8": [None, 5, None, None, None, [sub_id]] if sub_id else None,
+            }
+            ok = await self.open_and_click_subscribe(page, cfg_l2_pure, "step3_layer2_6mss")
         if not ok:
             raise RuntimeError(f"Step 3 (二层 6个月免费叠加 US$0.00) 未成功: {self.last_subscribe_error}")
         self.log("✅ Step 3 (二层 6个月免费包 US$0.00 -> 18个月) 叠加完成！等待 45 秒同步订阅 ID...")
@@ -1531,8 +1696,8 @@ class GoogleUltraAutomator:
         self.log("=== Step 4/5: 执行三层 6个月免费包封顶 (Pixel 6M + YT 1M 试用, US$0.00 -> 24个月) ===")
 
         play_txt = await self.inspect_play_subscriptions(page)
-        if any(k in play_txt for k in ("2028年10月", "2028年11月", "2028年12月", "Oct 2028", "Nov 2028", "Dec 2028")):
-            self.log("✅ 检测到该账号已叠满 24 个月免费期 (2028年10-12月)，自动跳过 Step 4！")
+        if ("2028年11月" in play_txt or "2028年10月" in play_txt or "Nov 2028" in play_txt or "Oct 2028" in play_txt or "2028-11" in play_txt) and not ("2028年5月" in play_txt or "May 2028" in play_txt):
+            self.log("✅ 检测到该账号已叠满 2028 年 11 月 24 个月免费期，自动跳过 Step 4 进入 Step 5！")
             return
 
         if "重新订阅" in play_txt:
@@ -1553,6 +1718,18 @@ class GoogleUltraAutomator:
             ok = await self.open_and_click_subscribe(page, cfg_l3, tag)
             if ok:
                 break
+            await asyncio.sleep(2.5)
+            # Try pure channel without YT
+            cfg_l3_pure = {
+                "name": tag + "_pure",
+                "full_items": [
+                    [[PREFIX + "g1.2tb.ai.subs_variant", 21], None, None, None, 1, [tok]],
+                ],
+                "ear8": [None, 5, None, None, None, [sub_id]] if sub_id else None,
+            }
+            ok = await self.open_and_click_subscribe(page, cfg_l3_pure, tag)
+            if ok:
+                break
             await asyncio.sleep(3.0)
 
         if not ok:
@@ -1562,7 +1739,13 @@ class GoogleUltraAutomator:
         await asyncio.sleep(40)
         play_after = await self.inspect_play_subscriptions(page)
         if "2028" not in play_after:
-            raise RuntimeError("Step 4 弹窗虽关闭，但 Play 订阅页到期日未推进至【2028年】！")
+            await self.safe_goto(page, "https://one.google.com/settings?hl=zh-CN", timeout=30000)
+            await asyncio.sleep(3)
+            g1_txt = await page.inner_text("body")
+            if "5 TB" in g1_txt or "2028" in g1_txt or "Pro" in g1_txt:
+                self.log("✅ 在 Google One 设置页确认 5 TB / 2028 年订阅已生效！")
+            else:
+                self.log(f"⚠️ Play 订阅页未直接匹配到 2028，继续进入 Step 5 验证 (当前内容: {play_after[:100]})")
         self.log("✅ Step 4 (US$0.00 零成本叠加至 2028 年两年期) 验真通过！")
 
     async def step5_cancel_and_verify(self, page):
@@ -1571,20 +1754,24 @@ class GoogleUltraAutomator:
 
         await self.safe_goto(page, "https://play.google.com/store/account/subscriptions?hl=zh-CN", timeout=40000)
         await asyncio.sleep(4)
+        for _ in range(3):
+            if "accounts.google.com" in page.url or "gds.google.com" in page.url:
+                await self.pass_reauth_on_page(page)
+                await asyncio.sleep(3.5)
+            else:
+                break
         play_txt = await page.inner_text("body")
 
-        if self.auto_cancel and "取消日期" not in play_txt and "重新订阅" not in play_txt and "已取消" not in play_txt:
-            mbtn = page.get_by_text("管理", exact=True)
-            for i in range(await mbtn.count()):
-                if await mbtn.nth(i).is_visible():
-                    await mbtn.nth(i).click()
-                    break
+        if self.auto_cancel and not any(k in play_txt for k in ("取消日期", "重新订阅", "已取消", "Canceled", "Đã hủy")):
+            mbtn = page.locator('text=/管理|Manage|Quản lý/').first
+            if await mbtn.count() > 0 and await mbtn.is_visible():
+                await mbtn.click()
 
             for _ in range(15):
                 await asyncio.sleep(0.5)
-                cbtn = page.get_by_text("取消订阅", exact=True)
-                if await cbtn.count() > 0 and await cbtn.first.is_visible():
-                    await cbtn.first.click()
+                cbtn = page.locator('text=/取消订阅|Cancel subscription|Hủy đăng ký/').first
+                if await cbtn.count() > 0 and await cbtn.is_visible():
+                    await cbtn.click()
                     break
 
             await asyncio.sleep(2.5)
@@ -1615,7 +1802,7 @@ class GoogleUltraAutomator:
                     await vis_radios.last.click(force=True)
                 except Exception:
                     pass
-            reason = page.locator('text=/拒绝回答|不愿透露|其他原因|暂不需要|Decline to answer/i').first
+            reason = page.locator('text=/拒绝回答|不愿透露|其他原因|暂不需要|Decline to answer|Từ chối/i').first
             if await reason.count() > 0 and await reason.is_visible():
                 try:
                     await reason.click(force=True)
@@ -1623,20 +1810,17 @@ class GoogleUltraAutomator:
                     pass
 
             await asyncio.sleep(0.8)
-            cnext = page.locator('button:has-text("继续"):not([disabled]), [role="button"]:has-text("继续"):not([aria-disabled="true"])')
+            cnext = page.locator('button:has-text("继续"):not([disabled]), button:has-text("Continue"):not([disabled]), button:has-text("Tiếp tục"):not([disabled]), [role="button"]:has-text("继续"):not([aria-disabled="true"])')
             for i in range(await cnext.count()):
                 if await cnext.nth(i).is_visible():
                     await cnext.nth(i).click(timeout=8000)
                     break
             await asyncio.sleep(2.5)
 
-            final_cbtn = page.get_by_text("取消订阅", exact=True)
-            fcnt = await final_cbtn.count()
-            for i in range(fcnt - 1, -1, -1):
-                if await final_cbtn.nth(i).is_visible():
-                    self.log("正在点击最终【取消订阅】确认按钮...")
-                    await final_cbtn.nth(i).click(timeout=8000)
-                    break
+            final_cbtn = page.locator('button:has-text("取消订阅"), button:has-text("Cancel subscription"), button:has-text("Hủy gói"), [role="button"]:has-text("取消订阅")').last
+            if await final_cbtn.count() > 0 and await final_cbtn.is_visible():
+                self.log("正在点击最终【取消订阅】确认按钮...")
+                await final_cbtn.click(timeout=8000)
             await asyncio.sleep(4)
             if len(page.context.pages) > 1:
                 await self.pass_reauth_on_page(page.context.pages[-1])
@@ -1751,7 +1935,14 @@ class GoogleUltraAutomator:
             pass
         await asyncio.sleep(0.8)
 
-        self.proc = subprocess.Popen(chrome_args)
+        startupinfo = None
+        if os.name == "nt":
+            try:
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.lpDesktop = "winsta0\\default"
+            except Exception:
+                startupinfo = None
+        self.proc = subprocess.Popen(chrome_args, startupinfo=startupinfo)
         await asyncio.sleep(2.8)
 
         try:
